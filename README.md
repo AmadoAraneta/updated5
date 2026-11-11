@@ -1,4 +1,4 @@
-# Checkout Counter Demo — Workstream A
+# Checkout Counter Demo — Checkout Counter
 
 A local React + TypeScript + Vite frontend connected to a Python + FastAPI backend. QR is simulated; NFC can use the included ESP32 + RC522 serial reader. No real money is processed.
 
@@ -35,7 +35,7 @@ Open http://localhost:5173.
 
 ## Test flow
 
-1. Use manual Session ID `DEMO-1001` (or use the ZXing camera scanner with a barcode containing that text).
+1. Enter Ticket Receipt ID `DEMO-1001` manually to load the purchase.
 2. Review the items subtotal (₱34.00) plus the fixed parking fee (₱20.00); total due is ₱54.00 and continue.
 3. Select simulated QR or NFC.
 4. For QR, scan the displayed code or click **Approve on this device**. The phone-friendly mock URL is served by the backend.
