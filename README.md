@@ -45,11 +45,19 @@ Open http://localhost:5173.
 
 ## Phone QR testing
 
-The backend is already bound to `0.0.0.0`. Find the laptop IP with `ipconfig` (Windows) or `ip addr`/`ifconfig` (macOS/Linux). Replace `localhost` in the generated URL with the laptop IP, for example:
+The backend is bound to `0.0.0.0` and now generates phone QR links using the computer's LAN address instead of `localhost`. Connect the phone and checkout computer to the same Wi-Fi or hotspot, and allow Python through the firewall if prompted. The frontend polls the backend, so approving from the phone updates the checkout screen.
 
-`http://192.168.1.25:5000/phone/PAY-ABC123`
+If the generated address is not the correct network address, set `PUBLIC_BASE_URL` before starting the backend. For example:
 
-Connect the phone and laptop to the same Wi-Fi/hotspot and allow Python through the firewall if prompted. The frontend polls the backend, so approving from the phone updates the checkout screen.
+```shell
+# macOS/Linux
+export PUBLIC_BASE_URL=http://192.168.1.25:5000
+
+# Windows PowerShell
+$env:PUBLIC_BASE_URL="http://192.168.1.25:5000"
+```
+
+Then restart the backend and create a new QR payment. The QR page should open at an address such as `http://192.168.1.25:5000/phone/PAY-ABC123`.
 
 ## Optional configuration
 

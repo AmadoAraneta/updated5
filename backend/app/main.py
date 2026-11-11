@@ -5,6 +5,7 @@ from typing import Literal
 from uuid import uuid4
 import json
 import os
+import socket
 import threading
 import time
 
@@ -203,6 +204,34 @@ def stop_nfc_serial_listener():
 
 
 
+def public_origin(http_request: Request) -> str:
+    """Return an origin that a phone can use to reach this backend."""
+    configured = os.getenv('PUBLIC_BASE_URL', '').strip().rstrip('/')
+    if configured:
+        return configured
+
+    forwarded_proto = http_request.headers.get('x-forwarded-proto')
+    forwarded_host = http_request.headers.get('x-forwarded-host')
+    if forwarded_host:
+        return f"{forwarded_proto or http_request.url.scheme}://{forwarded_host}".rstrip('/')
+
+    scheme = http_request.url.scheme
+    host = http_request.headers.get('host') or http_request.url.netloc
+    hostname = host.split(':', 1)[0].strip('[]')
+    port = http_request.url.port
+    if hostname in {'localhost', '127.0.0.1', '0.0.0.0', '::1'}:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(('8.8.8.8', 80))
+                hostname = sock.getsockname()[0]
+        except OSError:
+            pass
+
+    if port and not ((scheme == 'http' and port == 80) or (scheme == 'https' and port == 443)):
+        return f"{scheme}://{hostname}:{port}"
+    return f"{scheme}://{hostname}"
+
+
 def now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -363,13 +392,14 @@ def create_payment(request: PaymentRequest, http_request: Request):
         'expires_at': now() + timedelta(minutes=5),
         'simulation_reference': f'SIM-{payment_method}-{token.removeprefix("PAY-").removeprefix("SIM-")}',
     }
+    origin = public_origin(http_request)
     if payment_method == 'QR':
-        phone_url = str(http_request.base_url).rstrip('/') + f'/phone/{token}'
+        phone_url = origin + f'/phone/{token}'
         payment['phone_url'] = phone_url
-        payment['qr_image_url'] = str(http_request.base_url).rstrip('/') + f'/api/payments/{token}/qr'
+        payment['qr_image_url'] = origin + f'/api/payments/{token}/qr'
         payment['mock_url'] = phone_url
     else:
-        payment['mock_url'] = str(http_request.base_url).rstrip('/') + f'/mock-payment/{token}'
+        payment['mock_url'] = origin + f'/mock-payment/{token}'
     PAYMENTS[token] = payment
     return {
         **payment_result(payment),
@@ -488,10 +518,10 @@ def phone_page(token: str):
     payment = PAYMENTS.get(token)
     if not payment or payment['method'] != 'QR':
         raise HTTPException(404, 'Payment token not found')
-    return HTMLResponse(f'''<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Demo QR Payment</title>
-<style>body{{font-family:Arial,sans-serif;max-width:460px;margin:30px auto;padding:20px;background:#f5f7fa;color:#153b5b}}.card{{background:#fff;padding:26px;border-radius:18px;box-shadow:0 8px 24px #193b5b1a}}button{{width:100%;padding:15px;margin-top:12px;border:0;border-radius:10px;font-size:16px;font-weight:bold;cursor:pointer}}.ok{{background:#153b5b;color:#fff}}.bad{{background:#fff0ee;color:#ae3028}}.demo{{background:#fff3dd;border:1px solid #f3d394;border-radius:10px;padding:12px;font-size:13px}}#out{{white-space:pre-wrap;text-align:center;font-weight:bold}}</style>
-<div class="card"><h1>Demo QR Payment</h1><div class="demo"><b>SIMULATION ONLY</b><br>No real money is processed.</div><p>Transaction: <b>{payment['transaction_id']}</b></p><p>Amount: <b>₱{payment['amount']:.2f} DEMO</b></p><p>Includes fixed parking fee: ₱{PARKING_FEE:.2f}</p><button class="ok" onclick="confirmPayment('DEMO-APPROVE')">Approve simulated payment</button><button class="bad" onclick="confirmPayment('DEMO-DECLINE')">Decline simulated payment</button><p id="out"></p></div>
-<script>async function confirmPayment(value){{document.querySelectorAll('button').forEach(b=>b.disabled=true);const r=await fetch('/api/payments/{token}/confirm',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{confirmation:value}})}});const d=await r.json();if(r.ok&&d.status==='successful'){{document.getElementById('out').textContent='PAYMENT APPROVED — opening receipt…';setTimeout(()=>window.location.href='/receipt/{token}',650);}}else{{document.getElementById('out').textContent=r.status===409?'DUPLICATE: this payment was already confirmed':(r.ok?'PAYMENT DECLINED':((d.detail&&d.detail.detail)||'Payment already confirmed'));}}}}</script>''')
+    return HTMLResponse(f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Demo QR Payment</title>
+<style>html,body{{min-height:100%;background:#f5f7fa}}body{{font-family:Arial,sans-serif;max-width:460px;margin:0 auto;padding:30px 20px;color:#153b5b}}.card{{background:#fff;padding:26px;border-radius:18px;box-shadow:0 8px 24px #193b5b1a}}button{{width:100%;padding:15px;margin-top:12px;border:0;border-radius:10px;font-size:16px;font-weight:bold;cursor:pointer}}button:disabled{{opacity:.55;cursor:wait}}.ok{{background:#153b5b;color:#fff}}.bad{{background:#fff0ee;color:#ae3028}}.demo{{background:#fff3dd;border:1px solid #f3d394;border-radius:10px;padding:12px;font-size:13px}}#out{{white-space:pre-wrap;text-align:center;font-weight:bold;min-height:22px}}</style></head><body>
+<div class="card"><h1>Demo QR Payment</h1><div class="demo"><b>SIMULATION ONLY</b><br>No real money is processed.</div><p>Transaction: <b>{payment['transaction_id']}</b></p><p>Amount: <b>₱{payment['amount']:.2f} DEMO</b></p><p>Includes fixed parking fee: ₱{PARKING_FEE:.2f}</p><button type="button" class="ok" onclick="confirmPayment('DEMO-APPROVE')">Approve simulated payment</button><button type="button" class="bad" onclick="confirmPayment('DEMO-DECLINE')">Decline simulated payment</button><p id="out" role="status"></p></div>
+<script>async function confirmPayment(value){{const output=document.getElementById('out');document.querySelectorAll('button').forEach(b=>b.disabled=true);output.textContent='Processing…';try{{const r=await fetch('/api/payments/{token}/confirm',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{confirmation:value}})}});const d=await r.json().catch(()=>({{}}));if(r.ok&&d.status==='successful'){{output.textContent='PAYMENT APPROVED — opening receipt…';setTimeout(()=>window.location.href='/receipt/{token}',650);}}else{{output.textContent=r.status===409?'DUPLICATE: this payment was already confirmed':(r.ok?'PAYMENT DECLINED':((d.detail&&d.detail.detail)||d.detail||'Payment could not be completed'));document.querySelectorAll('button').forEach(b=>b.disabled=false);}}}}catch(error){{output.textContent='Unable to reach the checkout server. Keep your phone and checkout device on the same network.';document.querySelectorAll('button').forEach(b=>b.disabled=false);}}}}</script></body></html>''')
 
 
 @app.get('/receipt/{token}', response_class=HTMLResponse)
